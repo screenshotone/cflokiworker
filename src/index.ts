@@ -1,32 +1,70 @@
-/**
- * Welcome to Cloudflare Workers! This is your first worker.
- *
- * - Run `npm run dev` in your terminal to start a development server
- * - Open a browser tab at http://localhost:8787/ to see your worker in action
- * - Run `npm run deploy` to publish your worker
- *
- * Learn more at https://developers.cloudflare.com/workers/
- */
-
 export interface Env {
-	// Example binding to KV. Learn more at https://developers.cloudflare.com/workers/runtime-apis/kv/
-	// MY_KV_NAMESPACE: KVNamespace;
-	//
-	// Example binding to Durable Object. Learn more at https://developers.cloudflare.com/workers/runtime-apis/durable-objects/
-	// MY_DURABLE_OBJECT: DurableObjectNamespace;
-	//
-	// Example binding to R2. Learn more at https://developers.cloudflare.com/workers/runtime-apis/r2/
-	// MY_BUCKET: R2Bucket;
-	//
-	// Example binding to a Service. Learn more at https://developers.cloudflare.com/workers/runtime-apis/service-bindings/
-	// MY_SERVICE: Fetcher;
-	//
-	// Example binding to a Queue. Learn more at https://developers.cloudflare.com/queues/javascript-apis/
-	// MY_QUEUE: Queue;
+	LOKI_PUSH_URL: string;
 }
 
 export default {
-	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-		return new Response('Hello World!');
+	async tail(events: TraceItem[], env: Env) {
+		const data = this.transformEvents(events);
+		if (data.streams.length == 0) {
+			return;
+		}
+
+		fetch(env.LOKI_PUSH_URL, {
+			method: 'POST',
+			body: JSON.stringify(data),
+		});
+	},
+
+	transformEvents(events: TraceItem[]) {
+		const streams: { stream: Record<string, string>; values: [number, string][] }[] = [];
+		for (const event of events) {
+			this.transformEvent(event).forEach((stream) => streams.push(stream));
+		}
+
+		return { streams };
+	},
+
+	transformEvent(event: TraceItem) {
+		if (!(event.outcome == 'ok' || event.outcome == 'exception') || !event.scriptName) {
+			return [];
+		}
+
+		const streams: { stream: Record<string, string>; values: [number, string][] }[] = [];
+
+		const logsByLevel: Record<string, [number, string][]> = {};
+		for (const log of event.logs) {
+			if (!(log.level in logsByLevel)) {
+				logsByLevel[log.level] = [];
+			}
+			logsByLevel[log.level].push([log.timestamp * 100000, log.message]);
+		}
+
+		for (const [level, logs] of Object.entries(logsByLevel)) {
+			if (level == 'debug') {
+				continue;
+			}
+
+			streams.push({
+				stream: {
+					level,
+					outcome: event.outcome,
+					app: event.scriptName,
+				},
+				values: logs,
+			});
+		}
+
+		if (event.exceptions.length) {
+			streams.push({
+				stream: {
+					level: 'error',
+					outcome: event.outcome,
+					app: event.scriptName,
+				},
+				values: event.exceptions.map((e) => [e.timestamp * 100000, `${e.name}: ${e.message}`]),
+			});
+		}
+
+		return streams;
 	},
 };
