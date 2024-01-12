@@ -16,7 +16,7 @@ export default {
 	},
 
 	transformEvents(events: TraceItem[]) {
-		const streams: { stream: Record<string, string>; values: [number, string][] }[] = [];
+		const streams: { stream: Record<string, string>; values: [string, string][] }[] = [];
 		for (const event of events) {
 			this.transformEvent(event).forEach((stream) => streams.push(stream));
 		}
@@ -29,14 +29,14 @@ export default {
 			return [];
 		}
 
-		const streams: { stream: Record<string, string>; values: [number, string][] }[] = [];
+		const streams: { stream: Record<string, string>; values: [string, string][] }[] = [];
 
-		const logsByLevel: Record<string, [number, string][]> = {};
+		const logsByLevel: Record<string, [string, string][]> = {};
 		for (const log of event.logs) {
 			if (!(log.level in logsByLevel)) {
 				logsByLevel[log.level] = [];
 			}
-			logsByLevel[log.level].push([log.timestamp * 100000, log.message]);
+			logsByLevel[log.level].push([(log.timestamp * 100000).toString(), log.message]);
 		}
 
 		for (const [level, logs] of Object.entries(logsByLevel)) {
@@ -61,7 +61,7 @@ export default {
 					outcome: event.outcome,
 					app: event.scriptName,
 				},
-				values: event.exceptions.map((e) => [e.timestamp * 100000, `${e.name}: ${e.message}`]),
+				values: event.exceptions.map((e) => [(e.timestamp * 100000).toString(), `${e.name}: ${e.message}`]),
 			});
 		}
 
