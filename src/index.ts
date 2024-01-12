@@ -1,16 +1,25 @@
 export interface Env {
 	LOKI_PUSH_URL: string;
+	LOKI_CREDENTIALS: string;
+}
+
+function toLogNanoSeconds(timestamp: number) {
+	return (timestamp * 1000000).toLocaleString('fullwide', { useGrouping: false });
 }
 
 export default {
-	async tail(events: TraceItem[], env: Env) {
+	async tail(events: TraceItem[], env: Env, context: ExecutionContext) {
 		const data = this.transformEvents(events);
 		if (data.streams.length == 0) {
 			return;
 		}
 
-		fetch(env.LOKI_PUSH_URL, {
+		await fetch(env.LOKI_PUSH_URL, {
 			method: 'POST',
+			headers: {
+				authorization: `Basic ${env.LOKI_CREDENTIALS}`,
+				'content-type': 'application/json',
+			},
 			body: JSON.stringify(data),
 		});
 	},
@@ -36,7 +45,11 @@ export default {
 			if (!(log.level in logsByLevel)) {
 				logsByLevel[log.level] = [];
 			}
-			logsByLevel[log.level].push([(log.timestamp * 100000).toString(), log.message]);
+
+			const [logMessage] = log.message;
+			if (logMessage) {
+				logsByLevel[log.level].push([toLogNanoSeconds(log.timestamp), logMessage]);
+			}
 		}
 
 		for (const [level, logs] of Object.entries(logsByLevel)) {
@@ -61,7 +74,7 @@ export default {
 					outcome: event.outcome,
 					app: event.scriptName,
 				},
-				values: event.exceptions.map((e) => [(e.timestamp * 100000).toString(), `${e.name}: ${e.message}`]),
+				values: event.exceptions.map((e) => [toLogNanoSeconds(e.timestamp), `${e.name}: ${e.message}`]),
 			});
 		}
 
