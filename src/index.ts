@@ -1,6 +1,24 @@
 export interface Env {
 	LOKI_PUSH_URL: string;
-	LOKI_CREDENTIALS: string;
+	LOKI_CREDENTIALS?: string;
+}
+
+// The live worker has only LOKI_PUSH_URL, with the credentials inside the URL
+// (https://user:token@host/…). fetch() doesn't send those by itself, so they
+// become the authorization header here. LOKI_CREDENTIALS, when set, wins.
+function pushTarget(env: Env): { url: string; headers: Record<string, string> } {
+	const headers: Record<string, string> = { 'content-type': 'application/json' };
+	const url = new URL(env.LOKI_PUSH_URL);
+	if (env.LOKI_CREDENTIALS) {
+		headers.authorization = `Basic ${env.LOKI_CREDENTIALS}`;
+	} else if (url.username || url.password) {
+		const credentials = `${decodeURIComponent(url.username)}:${decodeURIComponent(url.password)}`;
+		headers.authorization = `Basic ${btoa(credentials)}`;
+	}
+	url.username = '';
+	url.password = '';
+
+	return { url: url.toString(), headers };
 }
 
 function toLogNanoSeconds(timestamp: number) {
@@ -14,14 +32,17 @@ export default {
 			return;
 		}
 
-		await fetch(env.LOKI_PUSH_URL, {
+		const target = pushTarget(env);
+		const response = await fetch(target.url, {
 			method: 'POST',
-			headers: {
-				authorization: `Basic ${env.LOKI_CREDENTIALS}`,
-				'content-type': 'application/json',
-			},
+			headers: target.headers,
 			body: JSON.stringify(data),
 		});
+		// A refused push must fail the invocation: otherwise lost logs look
+		// like success in the worker's own analytics.
+		if (!response.ok) {
+			throw new Error(`Loki refused the push with status ${response.status}`);
+		}
 	},
 
 	transformEvents(events: TraceItem[]) {

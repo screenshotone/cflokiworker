@@ -16,8 +16,6 @@ jobs:
               with:
                   apiToken: ${{ secrets.CF_API_TOKEN }}
                   accountId: ${{ secrets.CF_ACCOUNT_ID }}
-                  vars: LOKI_PUSH_URL                      
-                  vars: LOKI_CREDENTIALS                      
-              env:
-                  LOKI_PUSH_URL: ${{ secrets.LOKI_PUSH_URL }}
-                  LOKI_CREDENTIALS: ${{ secrets.LOKI_CREDENTIALS }}
+                  # The worker's only variable, LOKI_PUSH_URL (with the Loki
+                  # credentials inside), is kept as it is set on Cloudflare.
+                  command: deploy --keep-vars
