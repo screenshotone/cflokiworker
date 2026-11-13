@@ -34,7 +34,7 @@ export default {
 	},
 
 	transformEvent(event: TraceItem) {
-		if (!(event.outcome == 'ok' || event.outcome == 'exception') || !event.scriptName) {
+		if (!event.scriptName) {
 			return [];
 		}
 
@@ -78,6 +78,47 @@ export default {
 			});
 		}
 
+		// One line for an invocation that didn't end normally, for example a
+		// client that disconnected: such an invocation often logs nothing itself.
+		if (event.outcome != 'ok' && event.outcome != 'exception') {
+			streams.push({
+				stream: {
+					level: 'warn',
+					outcome: event.outcome,
+					app: event.scriptName,
+				},
+				values: [[toLogNanoSeconds(event.eventTimestamp ?? Date.now()), JSON.stringify(describeInvocation(event))]],
+			});
+		}
+
 		return streams;
 	},
 };
+
+// Only what identifies the request without its query string: the query holds
+// access keys and signatures.
+function describeInvocation(event: TraceItem) {
+	const line: Record<string, unknown> = { event: 'invocation_ended', outcome: event.outcome };
+
+	const info = event.event as any;
+	const request = info?.request;
+	if (request) {
+		line.method = request.method;
+		try {
+			const url = new URL(request.url);
+			line.host = url.hostname;
+			line.path = url.pathname;
+		} catch {
+			// the line is still useful without the URL
+		}
+		line.ray = request.headers?.['cf-ray'];
+		line.colo = request.cf?.colo;
+		line.asn = request.cf?.asn;
+		line.country = request.cf?.country;
+	}
+	if (info?.response?.status !== undefined) {
+		line.status = info.response.status;
+	}
+
+	return line;
+}
